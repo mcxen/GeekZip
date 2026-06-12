@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/geekzip-core",
+    "crates/geekzip-cli",
+    "src-tauri",
+]
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+infer = "0.19"
+walkdir = "2"
+tempfile = "3"
+notify = { version = "7", features = ["macos_kqueue"] }
+
+# Fix time/cookie conflict
+time = "0.3"

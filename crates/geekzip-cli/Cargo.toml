@@ -1,0 +1,16 @@
+[package]
+name = "geekzip-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "geekzip"
+path = "src/main.rs"
+
+[dependencies]
+geekzip-core = { path = "../geekzip-core" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { version = "4", features = ["derive"] }

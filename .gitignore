@@ -1,0 +1,22 @@
+# Build
+/target/
+/dist/
+node_modules/
+*.dmg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env
+.env
+.env.local
+
+# Logs
+*.log

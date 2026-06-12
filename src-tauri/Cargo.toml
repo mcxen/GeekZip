@@ -1,0 +1,28 @@
+[package]
+name = "geekzip"
+version = "0.1.0"
+description = "GeekZip - Smart Archive Tool"
+authors = ["GeekZip"]
+edition = "2021"
+
+[lib]
+name = "geekzip_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+geekzip-core = { path = "../crates/geekzip-core" }
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-opener = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+dirs = "6"
+sysinfo = "0.34"
+once_cell = "1"
