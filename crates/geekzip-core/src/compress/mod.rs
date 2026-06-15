@@ -47,11 +47,12 @@ impl CompressEngine {
         }
     }
 
-    fn compress_zip(paths: &[&Path], output: &Path, _opts: &CompressOptions) -> Result<()> {
+    fn compress_zip(paths: &[&Path], output: &Path, opts: &CompressOptions) -> Result<()> {
         let file = fs::File::create(output)?;
         let mut zip = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
+            .compression_method(zip::CompressionMethod::Deflated)
+            .compression_level(Some(opts.level.clamp(1, 9) as i64));
 
         for path in paths {
             if path.is_file() {

@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "crates/geekzip-core",
     "crates/geekzip-cli",
-    "src-tauri",
+    "crates/geekzip-gpui",
 ]
 
 [workspace.dependencies]

@@ -1,0 +1,14 @@
+[package]
+name = "geekzip-gpui"
+version = "0.2.0"
+edition = "2024"
+description = "GeekZip native GPUI desktop application"
+
+[dependencies]
+anyhow = { workspace = true }
+geekzip-core = { path = "../geekzip-core" }
+gpui = "0.2.2"
+gpui-component = "0.5.1"
+serde_json = { workspace = true }
+sysinfo = "0.34"
+walkdir = { workspace = true }

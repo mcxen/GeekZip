@@ -1,6 +1,8 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::format::{detect_format, ArchiveFormat};
@@ -11,6 +13,8 @@ pub struct ExtractOptions {
     pub create_subfolder: bool,
     pub overwrite: OverwritePolicy,
     pub password: Option<String>,
+    #[serde(default)]
+    pub password_candidates: Vec<String>,
     pub delete_after: bool,
     pub open_after: bool,
     pub verify: bool,
@@ -30,6 +34,7 @@ impl Default for ExtractOptions {
             create_subfolder: true,
             overwrite: OverwritePolicy::Rename,
             password: None,
+            password_candidates: Vec::new(),
             delete_after: false,
             open_after: false,
             verify: false,
@@ -63,18 +68,18 @@ impl ExtractEngine {
         let target_dir = Self::resolve_target_dir(path, opts)?;
         fs::create_dir_all(&target_dir)?;
 
-        let result = match info.format {
+        let (result, password_used) = match info.format {
             ArchiveFormat::Zip => Self::extract_zip(path, &target_dir, opts)?,
-            ArchiveFormat::Tar => Self::extract_tar(path, &target_dir)?,
-            ArchiveFormat::TarGz => Self::extract_targz(path, &target_dir)?,
-            ArchiveFormat::TarBz2 => Self::extract_tarbz2(path, &target_dir)?,
-            ArchiveFormat::TarXz => Self::extract_tarxz(path, &target_dir)?,
-            ArchiveFormat::Gz => Self::extract_gz(path, &target_dir)?,
-            ArchiveFormat::Bz2 => Self::extract_bz2(path, &target_dir)?,
-            ArchiveFormat::Xz => Self::extract_xz(path, &target_dir)?,
-            ArchiveFormat::Zstd => Self::extract_zstd(path, &target_dir)?,
-            ArchiveFormat::SevenZ => Self::extract_7z(path, &target_dir, opts)?,
-            ArchiveFormat::Lz4 => Self::extract_lz4(path, &target_dir)?,
+            ArchiveFormat::Tar => (Self::extract_tar(path, &target_dir)?, None),
+            ArchiveFormat::TarGz => (Self::extract_targz(path, &target_dir)?, None),
+            ArchiveFormat::TarBz2 => (Self::extract_tarbz2(path, &target_dir)?, None),
+            ArchiveFormat::TarXz => (Self::extract_tarxz(path, &target_dir)?, None),
+            ArchiveFormat::Gz => (Self::extract_gz(path, &target_dir)?, None),
+            ArchiveFormat::Bz2 => (Self::extract_bz2(path, &target_dir)?, None),
+            ArchiveFormat::Xz => (Self::extract_xz(path, &target_dir)?, None),
+            ArchiveFormat::Zstd => (Self::extract_zstd(path, &target_dir)?, None),
+            ArchiveFormat::SevenZ => (Self::extract_7z(path, &target_dir, opts)?, None),
+            ArchiveFormat::Lz4 => (Self::extract_lz4(path, &target_dir)?, None),
             _ => bail!("Unsupported format: {:?}", info.format.name()),
         };
 
@@ -92,7 +97,7 @@ impl ExtractEngine {
             file_count: 0,
             total_size: 0,
             elapsed_ms: elapsed.as_millis() as u64,
-            password_used: opts.password.clone(),
+            password_used,
         })
     }
 
@@ -103,7 +108,8 @@ impl ExtractEngine {
 
         let parent = path.parent().unwrap_or(Path::new("."));
         if opts.create_subfolder {
-            let stem = path.file_stem()
+            let stem = path
+                .file_stem()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
@@ -127,16 +133,31 @@ impl ExtractEngine {
         Ok(files)
     }
 
-    fn extract_zip(path: &Path, target: &Path, opts: &ExtractOptions) -> Result<Vec<String>> {
+    fn extract_zip(
+        path: &Path,
+        target: &Path,
+        opts: &ExtractOptions,
+    ) -> Result<(Vec<String>, Option<String>)> {
         let file = fs::File::open(path)?;
         let mut archive = zip::ZipArchive::new(file)?;
-
-        if let Some(ref pwd) = opts.password {
-            archive = Self::try_zip_password(path, pwd)?;
-        }
+        let encrypted = (0..archive.len()).any(|index| {
+            archive
+                .by_index_raw(index)
+                .map(|entry| entry.encrypted())
+                .unwrap_or(false)
+        });
+        let password_used = if encrypted {
+            Some(Self::find_zip_password(path, opts)?)
+        } else {
+            None
+        };
 
         for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)?;
+            let mut entry = if let Some(password) = password_used.as_ref() {
+                archive.by_index_decrypt(i, password.as_bytes())?
+            } else {
+                archive.by_index(i)?
+            };
             let entry_path = match entry.enclosed_name() {
                 Some(p) => p.to_owned(),
                 None => continue,
@@ -154,13 +175,54 @@ impl ExtractEngine {
             }
         }
 
-        Self::collect_files(target)
+        Ok((Self::collect_files(target)?, password_used))
     }
 
-    fn try_zip_password(path: &Path, pwd: &str) -> Result<zip::ZipArchive<fs::File>> {
+    fn find_zip_password(path: &Path, opts: &ExtractOptions) -> Result<String> {
+        let mut candidates = Vec::new();
+        if let Some(password) = opts.password.as_ref() {
+            candidates.push(password.clone());
+        }
+        if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+            if let Some(password) = crate::password::PasswordEngine::extract_from_filename(name) {
+                candidates.push(password);
+            }
+        }
+        candidates.extend(opts.password_candidates.iter().cloned());
+        candidates.extend(
+            crate::password::BUILTIN_PASSWORDS
+                .iter()
+                .map(|value| value.to_string()),
+        );
+
+        let mut seen = HashSet::new();
+        candidates.retain(|password| !password.is_empty() && seen.insert(password.clone()));
+
+        for password in candidates {
+            if Self::validate_zip_password(path, &password).is_ok() {
+                return Ok(password);
+            }
+        }
+        bail!("Password required: no matching manual, filename, vault, or built-in password")
+    }
+
+    fn validate_zip_password(path: &Path, password: &str) -> Result<()> {
         let file = fs::File::open(path)?;
-        let archive = zip::ZipArchive::new(file)?;
-        Ok(archive)
+        let mut archive = zip::ZipArchive::new(file)?;
+        for index in 0..archive.len() {
+            let encrypted = archive.by_index_raw(index)?.encrypted();
+            if !encrypted {
+                continue;
+            }
+            let mut entry = archive.by_index_decrypt(index, password.as_bytes())?;
+            if entry.is_dir() {
+                continue;
+            }
+            let mut sink = Vec::new();
+            entry.read_to_end(&mut sink)?;
+            return Ok(());
+        }
+        bail!("Archive has no encrypted file entries")
     }
 
     fn extract_tar(path: &Path, target: &Path) -> Result<Vec<String>> {
@@ -198,7 +260,8 @@ impl ExtractEngine {
         let file = fs::File::open(path)?;
         let mut gz = flate2::read::GzDecoder::new(file);
 
-        let stem = path.file_stem()
+        let stem = path
+            .file_stem()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
@@ -214,7 +277,8 @@ impl ExtractEngine {
         let file = fs::File::open(path)?;
         let mut bz2 = bzip2::read::BzDecoder::new(file);
 
-        let stem = path.file_stem()
+        let stem = path
+            .file_stem()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
@@ -230,7 +294,8 @@ impl ExtractEngine {
         let file = fs::File::open(path)?;
         let mut xz = xz2::read::XzDecoder::new(file);
 
-        let stem = path.file_stem()
+        let stem = path
+            .file_stem()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
@@ -246,7 +311,8 @@ impl ExtractEngine {
         let file = fs::File::open(path)?;
         let mut zst = zstd::Decoder::new(file)?;
 
-        let stem = path.file_stem()
+        let stem = path
+            .file_stem()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
@@ -262,7 +328,8 @@ impl ExtractEngine {
         let file = fs::File::open(path)?;
         let mut lz4 = lz4_flex::frame::FrameDecoder::new(file);
 
-        let stem = path.file_stem()
+        let stem = path
+            .file_stem()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
@@ -278,5 +345,60 @@ impl ExtractEngine {
         sevenz_rust::decompress_file(path, target)
             .with_context(|| format!("Failed to extract 7z: {:?}", path))?;
         Self::collect_files(target)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn extracts_aes_zip_with_password_candidate() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive_path = temp.path().join("protected.zip");
+        let output = temp.path().join("output");
+        let file = fs::File::create(&archive_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .with_aes_encryption(zip::AesMode::Aes256, "vault-secret");
+        writer.start_file("hello.txt", options).unwrap();
+        writer.write_all(b"password vault works").unwrap();
+        writer.finish().unwrap();
+
+        let opts = ExtractOptions {
+            target_dir: Some(output.to_string_lossy().to_string()),
+            create_subfolder: false,
+            password_candidates: vec!["wrong".into(), "vault-secret".into()],
+            ..ExtractOptions::default()
+        };
+        let result = ExtractEngine::extract(&archive_path, &opts).unwrap();
+        assert_eq!(result.password_used.as_deref(), Some("vault-secret"));
+        assert_eq!(
+            fs::read(output.join("hello.txt")).unwrap(),
+            b"password vault works"
+        );
+    }
+
+    #[test]
+    fn rejects_aes_zip_when_passwords_do_not_match() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive_path = temp.path().join("protected.zip");
+        let file = fs::File::create(&archive_path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .with_aes_encryption(zip::AesMode::Aes256, "correct");
+        writer.start_file("hello.txt", options).unwrap();
+        writer.write_all(b"secret").unwrap();
+        writer.finish().unwrap();
+
+        let opts = ExtractOptions {
+            password_candidates: vec!["wrong".into()],
+            ..ExtractOptions::default()
+        };
+        let error = ExtractEngine::extract(&archive_path, &opts)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no matching"));
     }
 }

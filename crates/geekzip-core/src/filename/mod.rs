@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 const INTERFERENCE: &[&str] = &[
-    "删除", "去掉", "勿", "不要", "取消", "移除",
-    "delete", "remove", "cancel", "drop", "del",
+    "删除", "去掉", "勿", "不要", "取消", "移除", "delete", "remove", "cancel", "drop", "del",
     "复制", "copy", "副本", "拷贝",
 ];
 

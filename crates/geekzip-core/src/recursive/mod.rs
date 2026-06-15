@@ -30,8 +30,6 @@ impl RecursiveExtractor {
     pub fn extract_recursive(&self, path: &Path, opts: &ExtractOptions) -> Result<RecursiveResult> {
         let mut results = Vec::new();
         let mut seen = HashSet::new();
-        let canonical = std::fs::canonicalize(path)?;
-        seen.insert(canonical);
 
         self.extract_recursive_inner(path, opts, 0, &mut results, &mut seen)?;
 
@@ -78,7 +76,12 @@ impl RecursiveExtractor {
                     }
                 }
                 let sub_opts = ExtractOptions {
-                    target_dir: Some(fp.parent().unwrap_or(Path::new(".")).to_string_lossy().to_string()),
+                    target_dir: Some(
+                        fp.parent()
+                            .unwrap_or(Path::new("."))
+                            .to_string_lossy()
+                            .to_string(),
+                    ),
                     create_subfolder: true,
                     delete_after: opts.delete_after,
                     ..opts.clone()
@@ -88,5 +91,39 @@ impl RecursiveExtractor {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_zip(path: &Path, name: &str, bytes: &[u8]) {
+        let file = std::fs::File::create(path).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        archive.write_all(bytes).unwrap();
+        archive.finish().unwrap();
+    }
+
+    #[test]
+    fn extracts_nested_zip_without_false_cycle_detection() {
+        let temp = tempfile::tempdir().unwrap();
+        let inner = temp.path().join("inner.zip");
+        write_zip(&inner, "payload.txt", b"nested payload");
+
+        let outer = temp.path().join("outer.zip");
+        write_zip(&outer, "inner.zip", &std::fs::read(&inner).unwrap());
+        std::fs::remove_file(inner).unwrap();
+
+        let result = RecursiveExtractor::new(10)
+            .extract_recursive(&outer, &ExtractOptions::default())
+            .unwrap();
+
+        assert_eq!(result.total_layers, 2);
+        assert!(temp.path().join("outer/payload.txt").exists());
     }
 }

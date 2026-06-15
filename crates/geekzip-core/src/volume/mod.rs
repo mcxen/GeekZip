@@ -56,7 +56,10 @@ impl VolumeDetector {
         }
 
         if parts.len() > 1 {
-            let part_strs: Vec<String> = parts.iter().map(|p| p.to_string_lossy().to_string()).collect();
+            let part_strs: Vec<String> = parts
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
             return Some(VolumeInfo {
                 parts: part_strs,
                 is_complete: true,
@@ -94,7 +97,10 @@ impl VolumeDetector {
         }
 
         if parts.len() > 1 {
-            let part_strs: Vec<String> = parts.iter().map(|p| p.to_string_lossy().to_string()).collect();
+            let part_strs: Vec<String> = parts
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
             return Some(VolumeInfo {
                 parts: part_strs,
                 is_complete: true,
@@ -127,7 +133,10 @@ impl VolumeDetector {
         }
 
         if parts.len() > 1 {
-            let part_strs: Vec<String> = parts.iter().map(|p| p.to_string_lossy().to_string()).collect();
+            let part_strs: Vec<String> = parts
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
             return Some(VolumeInfo {
                 parts: part_strs,
                 is_complete: true,

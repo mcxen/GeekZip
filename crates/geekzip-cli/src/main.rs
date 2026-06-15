@@ -31,7 +31,12 @@ enum Commands {
         input: Vec<PathBuf>,
         #[arg(help = "Output archive path")]
         output: PathBuf,
-        #[arg(short, long, default_value = "zip", help = "Format: zip, tar.gz, tar.bz2, tar.xz, tar")]
+        #[arg(
+            short,
+            long,
+            default_value = "zip",
+            help = "Format: zip, tar.gz, tar.bz2, tar.xz, tar"
+        )]
         format: String,
         #[arg(short, long, help = "Password for encryption")]
         password: Option<String>,
@@ -47,13 +52,20 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Extract {
-            input, output, password, delete, subfolder, recursive, max_depth,
+            input,
+            output,
+            password,
+            delete,
+            subfolder,
+            recursive,
+            max_depth,
         } => {
             let opts = geekzip_core::ExtractOptions {
                 target_dir: output.map(|p| p.to_string_lossy().to_string()),
                 create_subfolder: subfolder,
                 overwrite: geekzip_core::OverwritePolicy::Rename,
                 password,
+                password_candidates: Vec::new(),
                 delete_after: delete,
                 open_after: false,
                 verify: false,
@@ -78,7 +90,12 @@ fn main() -> anyhow::Result<()> {
                 println!("  Time:   {}ms", result.elapsed_ms);
             }
         }
-        Commands::Compress { input, output, format, password } => {
+        Commands::Compress {
+            input,
+            output,
+            format,
+            password,
+        } => {
             let fmt = match format.as_str() {
                 "zip" => geekzip_core::CompressFormat::Zip,
                 "tar.gz" | "tgz" => geekzip_core::CompressFormat::TarGz,
