@@ -6,7 +6,7 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     App, AppContext, Application, Bounds, Context, Div, Entity, Hsla, InteractiveElement,
     IntoElement, ParentElement, PathPromptOptions, Render, StatefulInteractiveElement, Styled,
-    Task, Window, WindowBounds, WindowOptions, canvas, div, hsla, point, px, size,
+    Task, Window, WindowBounds, WindowOptions, canvas, div, point, px, size,
 };
 use gpui_component::{
     Root, Theme, ThemeMode,
@@ -14,6 +14,7 @@ use gpui_component::{
     scroll::ScrollableElement,
 };
 use std::{
+    borrow::Cow,
     collections::HashSet,
     fs,
     path::PathBuf,
@@ -24,39 +25,39 @@ use std::{
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
 const BG: Hsla = Hsla {
-    h: 0.55,
-    s: 0.28,
-    l: 0.035,
+    h: 0.43,
+    s: 0.33,
+    l: 0.022,
     a: 1.0,
 };
 const PANEL: Hsla = Hsla {
-    h: 0.48,
-    s: 0.20,
-    l: 0.055,
+    h: 0.43,
+    s: 0.34,
+    l: 0.047,
     a: 1.0,
 };
 const BORDER: Hsla = Hsla {
-    h: 0.46,
-    s: 0.16,
-    l: 0.18,
+    h: 0.43,
+    s: 0.44,
+    l: 0.155,
     a: 1.0,
 };
 const GREEN: Hsla = Hsla {
-    h: 0.40,
-    s: 0.92,
-    l: 0.51,
+    h: 0.431,
+    s: 1.0,
+    l: 0.50,
     a: 1.0,
 };
 const MUTED: Hsla = Hsla {
-    h: 0.48,
-    s: 0.08,
-    l: 0.58,
+    h: 0.43,
+    s: 0.14,
+    l: 0.49,
     a: 1.0,
 };
 const TEXT: Hsla = Hsla {
-    h: 0.46,
-    s: 0.08,
-    l: 0.86,
+    h: 0.43,
+    s: 0.31,
+    l: 0.89,
     a: 1.0,
 };
 
@@ -121,9 +122,59 @@ struct ResourceStats {
     system_cpu: u8,
     process_cpu: u8,
     gpu: Option<u8>,
+    memory_used_percent: u8,
     memory_used_mb: u64,
     process_memory_mb: u64,
     threads: usize,
+}
+
+#[derive(Clone)]
+struct ResourceHistory {
+    system_cpu: Vec<u8>,
+    process_cpu: Vec<u8>,
+    gpu: Vec<u8>,
+    memory: Vec<u8>,
+    process_memory: Vec<u8>,
+    threads: Vec<u8>,
+}
+
+impl Default for ResourceHistory {
+    fn default() -> Self {
+        Self {
+            system_cpu: vec![0; 36],
+            process_cpu: vec![0; 36],
+            gpu: vec![0; 36],
+            memory: vec![0; 36],
+            process_memory: vec![0; 36],
+            threads: vec![0; 36],
+        }
+    }
+}
+
+impl ResourceHistory {
+    const MAX_POINTS: usize = 36;
+
+    fn push_value(values: &mut Vec<u8>, value: u8) {
+        values.push(value.min(100));
+        if values.len() > Self::MAX_POINTS {
+            values.drain(0..values.len() - Self::MAX_POINTS);
+        }
+    }
+
+    fn push(&mut self, stats: &ResourceStats) {
+        Self::push_value(&mut self.system_cpu, stats.system_cpu);
+        Self::push_value(&mut self.process_cpu, stats.process_cpu);
+        Self::push_value(&mut self.gpu, stats.gpu.unwrap_or_default());
+        Self::push_value(&mut self.memory, stats.memory_used_percent);
+        Self::push_value(
+            &mut self.process_memory,
+            ((stats.process_memory_mb as f32 / 2048.0) * 100.0).round() as u8,
+        );
+        Self::push_value(
+            &mut self.threads,
+            ((stats.threads as f32 / 32.0) * 100.0).round() as u8,
+        );
+    }
 }
 
 struct GeekZipApp {
@@ -144,8 +195,10 @@ struct GeekZipApp {
     operation_log: Vec<String>,
     watch_task: Option<Task<()>>,
     resource_stats: ResourceStats,
+    resource_history: ResourceHistory,
     resource_system: Arc<Mutex<System>>,
     resource_task: Option<Task<()>>,
+    led_pulse: bool,
 }
 
 impl GeekZipApp {
@@ -169,8 +222,10 @@ impl GeekZipApp {
             operation_log: vec!["[READY] Rust 核心已连接".into()],
             watch_task: None,
             resource_stats: ResourceStats::default(),
+            resource_history: ResourceHistory::default(),
             resource_system: Arc::new(Mutex::new(System::new_all())),
             resource_task: None,
+            led_pulse: false,
         }
     }
 
@@ -203,12 +258,16 @@ impl GeekZipApp {
         let pid = Pid::from_u32(std::process::id());
         system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
         let process = system.process(pid);
+        let total_memory = system.total_memory().max(1);
         ResourceStats {
             system_cpu: system.global_cpu_usage().round().clamp(0.0, 100.0) as u8,
             process_cpu: process
                 .map(|process| process.cpu_usage().round().clamp(0.0, 100.0) as u8)
                 .unwrap_or_default(),
             gpu: Self::gpu_usage(),
+            memory_used_percent: ((system.used_memory() as f32 / total_memory as f32) * 100.0)
+                .round()
+                .clamp(0.0, 100.0) as u8,
             memory_used_mb: system.used_memory() / 1024 / 1024,
             process_memory_mb: process
                 .map(|process| process.memory() / 1024 / 1024)
@@ -232,6 +291,8 @@ impl GeekZipApp {
                 _ = cx.update(|cx| {
                     _ = this.update(cx, |this, cx| {
                         this.resource_stats = stats;
+                        this.resource_history.push(&this.resource_stats);
+                        this.led_pulse = !this.led_pulse;
                         cx.notify();
                     });
                 });
@@ -269,11 +330,74 @@ impl GeekZipApp {
             .bg(PANEL)
             .border_1()
             .border_color(BORDER)
-            .rounded(px(7.))
+            .rounded(px(2.))
+            .relative()
+            .overflow_hidden()
+            .child(Self::scanlines())
     }
 
     fn label(text: impl Into<gpui::SharedString>) -> Div {
-        div().text_xs().text_color(GREEN).child(text.into())
+        div()
+            .font_family("JetBrains Mono")
+            .text_xs()
+            .text_color(GREEN)
+            .child(text.into())
+    }
+
+    fn scanlines() -> impl IntoElement {
+        canvas(
+            |bounds, _, _| bounds,
+            |_, bounds, window, _| {
+                let rows = (bounds.size.height / px(4.)).ceil() as i32;
+                for row in 0..rows {
+                    window.paint_quad(gpui::fill(
+                        Bounds {
+                            origin: bounds.origin + point(px(0.), px(row as f32 * 4.)),
+                            size: size(bounds.size.width, px(1.)),
+                        },
+                        GREEN.opacity(0.018),
+                    ));
+                }
+
+                let length = px(18.);
+                let weight = px(1.5);
+                let color = GREEN.opacity(0.72);
+                let corners = [
+                    bounds.origin,
+                    point(bounds.right() - length, bounds.origin.y),
+                    point(bounds.origin.x, bounds.bottom() - length),
+                    point(bounds.right() - length, bounds.bottom() - length),
+                ];
+                for (index, origin) in corners.into_iter().enumerate() {
+                    let horizontal_y = if index > 1 {
+                        origin.y + length - weight
+                    } else {
+                        origin.y
+                    };
+                    let vertical_x = if index % 2 == 1 {
+                        origin.x + length - weight
+                    } else {
+                        origin.x
+                    };
+                    window.paint_quad(gpui::fill(
+                        Bounds {
+                            origin: point(origin.x, horizontal_y),
+                            size: size(length, weight),
+                        },
+                        color,
+                    ));
+                    window.paint_quad(gpui::fill(
+                        Bounds {
+                            origin: point(vertical_x, origin.y),
+                            size: size(weight, length),
+                        },
+                        color,
+                    ));
+                }
+            },
+        )
+        .absolute()
+        .size_full()
     }
 
     fn dot_grid() -> impl IntoElement {
@@ -423,22 +547,55 @@ impl GeekZipApp {
             }))
     }
 
-    fn dot_sparkline(seed: u8) -> Div {
-        let values = [2u8, 3, 2, 4, 3, 7, 4, 3, 2, 3, 2, 2];
-        div()
-            .w(px(54.))
-            .h(px(18.))
-            .flex()
-            .items_end()
-            .gap(px(2.))
-            .children(values.into_iter().enumerate().map(move |(index, value)| {
-                let height = 3 + ((value + seed + index as u8) % 8);
-                div()
-                    .w(px(2.5))
-                    .h(px(height as f32 * 1.6))
-                    .rounded(px(1.))
-                    .bg(GREEN.opacity(0.38 + height as f32 * 0.055))
-            }))
+    fn dynamic_sparkline(values: Vec<u8>) -> impl IntoElement {
+        div().w(px(72.)).h(px(22.)).relative().child(
+            canvas(
+                move |bounds, _, _| bounds,
+                move |_, bounds, window, _| {
+                    let count = values.len().max(1);
+                    let usable_w = 68.0;
+                    let usable_h = 16.0;
+                    let step = if count > 1 {
+                        usable_w / (count - 1) as f32
+                    } else {
+                        usable_w
+                    };
+                    let base_y = 19.0;
+                    let mut previous: Option<(f32, f32)> = None;
+
+                    for (index, value) in values.iter().enumerate() {
+                        let x = 2.0 + index as f32 * step;
+                        let y = base_y - (*value as f32 / 100.0) * usable_h;
+
+                        if let Some((prev_x, prev_y)) = previous {
+                            for point_index in 1..=4 {
+                                let t = point_index as f32 / 4.0;
+                                let line_x = prev_x + (x - prev_x) * t;
+                                let line_y = prev_y + (y - prev_y) * t;
+                                window.paint_quad(gpui::fill(
+                                    Bounds {
+                                        origin: bounds.origin + point(px(line_x), px(line_y)),
+                                        size: size(px(1.3), px(1.3)),
+                                    },
+                                    GREEN.opacity(0.58),
+                                ));
+                            }
+                        }
+
+                        window.paint_quad(gpui::fill(
+                            Bounds {
+                                origin: bounds.origin + point(px(x), px(y)),
+                                size: size(px(2.4), px(2.4)),
+                            },
+                            GREEN.opacity(0.92),
+                        ));
+                        previous = Some((x, y));
+                    }
+                },
+            )
+            .absolute()
+            .size_full(),
+        )
     }
 
     fn action_button(id: &'static str, text: &'static str) -> gpui::Stateful<Div> {
@@ -450,13 +607,13 @@ impl GeekZipApp {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(5.))
+            .rounded(px(2.))
             .border_1()
             .border_color(GREEN.opacity(0.7))
-            .bg(GREEN.opacity(0.08))
+            .bg(GREEN.opacity(0.055))
             .text_sm()
             .text_color(GREEN)
-            .hover(|style| style.bg(GREEN.opacity(0.16)))
+            .hover(|style| style.bg(GREEN.opacity(0.14)).border_color(GREEN))
             .child(text)
     }
 
@@ -474,10 +631,10 @@ impl GeekZipApp {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(4.))
+            .rounded(px(2.))
             .border_1()
             .border_color(if active { GREEN } else { BORDER })
-            .bg(if active { GREEN.opacity(0.1) } else { BG })
+            .bg(if active { GREEN.opacity(0.09) } else { BG })
             .text_xs()
             .text_color(if active { GREEN } else { MUTED })
             .child(text)
@@ -495,7 +652,7 @@ impl GeekZipApp {
         ];
 
         div()
-            .w(px(236.))
+            .w(px(222.))
             .h_full()
             .flex_none()
             .flex()
@@ -507,24 +664,43 @@ impl GeekZipApp {
                 div()
                     .flex_1()
                     .p_3()
-                    .child(Self::label("核心功能").px_3().py_2())
+                    .child(
+                        div()
+                            .px_3()
+                            .pt_2()
+                            .pb_3()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(Self::label("TACTICAL MODULES"))
+                            .child(div().text_xs().text_color(MUTED).child("07 ONLINE")),
+                    )
                     .children(pages.into_iter().enumerate().map(|(index, page)| {
                         let active = self.page == page;
                         div()
                             .id(("nav", index))
                             .cursor_pointer()
-                            .h(px(58.))
+                            .h(px(56.))
                             .mt_1()
                             .px_3()
                             .flex()
                             .items_center()
                             .gap_3()
-                            .rounded(px(6.))
+                            .rounded(px(2.))
                             .border_1()
                             .border_color(if active { GREEN.opacity(0.45) } else { BG })
                             .bg(if active { GREEN.opacity(0.08) } else { BG })
                             .text_color(if active { GREEN } else { TEXT })
-                            .child(div().w(px(22.)).text_lg().child(page.glyph()))
+                            .child(
+                                div()
+                                    .w(px(34.))
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .text_color(if active { GREEN } else { MUTED })
+                                    .child(div().text_xs().child(format!("M·{:02}", index + 1)))
+                                    .child(div().text_base().child(page.glyph())),
+                            )
                             .child(
                                 div()
                                     .flex()
@@ -549,7 +725,7 @@ impl GeekZipApp {
                     .border_color(BORDER)
                     .text_sm()
                     .text_color(MUTED)
-                    .child("⚙  设置"),
+                    .child("SYS·CONFIG  /  设置"),
             )
     }
 
@@ -569,21 +745,27 @@ impl GeekZipApp {
                     .flex()
                     .items_center()
                     .gap_3()
-                    .child(div().text_color(hsla(0.0, 0.85, 0.6, 1.0)).child("●"))
-                    .child(div().text_color(hsla(0.12, 0.9, 0.6, 1.0)).child("●"))
+                    .child(div().text_color(GREEN.opacity(0.24)).child("●"))
+                    .child(div().text_color(GREEN.opacity(0.5)).child("●"))
                     .child(div().text_color(GREEN).child("●"))
                     .child(div().h(px(30.)).w(px(1.)).mx_2().bg(BORDER))
-                    .child(div().text_xl().text_color(TEXT).child("GEEKZIP"))
+                    .child(
+                        div()
+                            .font_family("Major Mono Display")
+                            .text_xl()
+                            .text_color(TEXT)
+                            .child("GEEKZIP"),
+                    )
                     .child(
                         div()
                             .px_2()
                             .py_1()
-                            .rounded(px(3.))
+                            .rounded(px(2.))
                             .border_1()
                             .border_color(GREEN.opacity(0.65))
                             .text_xs()
                             .text_color(GREEN)
-                            .child("PRO"),
+                            .child("TACTICAL"),
                     ),
             )
             .child(
@@ -592,7 +774,7 @@ impl GeekZipApp {
                         .w(px(382.))
                         .h(px(44.))
                         .flex()
-                        .rounded(px(7.))
+                        .rounded(px(2.))
                         .border_1()
                         .border_color(BORDER)
                         .overflow_hidden()
@@ -618,7 +800,7 @@ impl GeekZipApp {
                                     .bg(if active { PANEL } else { BG })
                                     .text_sm()
                                     .text_color(if active { GREEN } else { MUTED })
-                                    .child(label)
+                                    .child(format!("[ {} ]", label))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.mode = mode;
                                         if mode == AppMode::Normal
@@ -638,11 +820,24 @@ impl GeekZipApp {
                     .flex()
                     .justify_end()
                     .gap_5()
-                    .text_lg()
+                    .text_sm()
                     .text_color(TEXT)
-                    .child("⌁")
-                    .child("⚙")
-                    .child("◎"),
+                    .child("NET/LOCAL")
+                    .child("SYS")
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_color(GREEN)
+                            .child(
+                                div()
+                                    .size(px(if self.led_pulse { 9. } else { 6. }))
+                                    .rounded_full()
+                                    .bg(GREEN.opacity(if self.led_pulse { 1.0 } else { 0.45 })),
+                            )
+                            .child("LINK"),
+                    ),
             )
     }
 
@@ -657,7 +852,14 @@ impl GeekZipApp {
             .items_center()
             .justify_center()
             .child(Self::dot_grid())
-            .child(div().text_2xl().text_color(GREEN).child("▣"))
+            .child(
+                div()
+                    .font_family("JetBrains Mono")
+                    .text_xs()
+                    .text_color(GREEN.opacity(0.7))
+                    .child("TARGET // ARCHIVE INPUT ZONE"),
+            )
+            .child(div().mt_4().text_2xl().text_color(GREEN).child("▣"))
             .child(div().mt_4().child(Self::dot_matrix_title()))
             .child(
                 div()
@@ -836,7 +1038,7 @@ impl GeekZipApp {
             .unwrap_or_default();
 
         div()
-            .w(px(350.))
+            .w(px(330.))
             .h_full()
             .flex_none()
             .flex()
@@ -1877,21 +2079,39 @@ impl GeekZipApp {
 
     fn status_bar(&self) -> impl IntoElement {
         let metrics = vec![
-            ("系统 CPU", format!("{}%", self.resource_stats.system_cpu)),
-            ("GeekZip", format!("{}%", self.resource_stats.process_cpu)),
+            (
+                "系统 CPU",
+                format!("{}%", self.resource_stats.system_cpu),
+                self.resource_history.system_cpu.clone(),
+            ),
+            (
+                "GeekZip",
+                format!("{}%", self.resource_stats.process_cpu),
+                self.resource_history.process_cpu.clone(),
+            ),
             (
                 "GPU",
                 self.resource_stats
                     .gpu
                     .map(|usage| format!("{usage}%"))
                     .unwrap_or_else(|| "N/A".into()),
+                self.resource_history.gpu.clone(),
             ),
-            ("内存", format!("{} MB", self.resource_stats.memory_used_mb)),
+            (
+                "内存",
+                format!("{} MB", self.resource_stats.memory_used_mb),
+                self.resource_history.memory.clone(),
+            ),
             (
                 "进程内存",
                 format!("{} MB", self.resource_stats.process_memory_mb),
+                self.resource_history.process_memory.clone(),
             ),
-            ("线程", self.resource_stats.threads.to_string()),
+            (
+                "线程",
+                self.resource_stats.threads.to_string(),
+                self.resource_history.threads.clone(),
+            ),
         ];
         div()
             .h(px(55.))
@@ -1904,7 +2124,7 @@ impl GeekZipApp {
                 metrics
                     .into_iter()
                     .enumerate()
-                    .map(|(index, (label, value))| {
+                    .map(|(_index, (label, value, history))| {
                         div()
                             .flex_1()
                             .flex()
@@ -1916,19 +2136,26 @@ impl GeekZipApp {
                             .text_xs()
                             .child(div().text_color(MUTED).child(label))
                             .child(div().text_color(GREEN).child(value))
-                            .child(Self::dot_sparkline(index as u8 * 2))
+                            .child(Self::dynamic_sparkline(history))
                     }),
             )
             .child(
                 div()
-                    .w(px(265.))
+                    .w(px(250.))
                     .flex_none()
                     .flex()
                     .items_center()
                     .justify_center()
                     .text_xs()
                     .text_color(GREEN)
-                    .child("●  系统运行正常"),
+                    .gap_2()
+                    .child(
+                        div()
+                            .size(px(if self.led_pulse { 9. } else { 6. }))
+                            .rounded_full()
+                            .bg(GREEN.opacity(if self.led_pulse { 1.0 } else { 0.45 })),
+                    )
+                    .child("ALL SYSTEMS NOMINAL"),
             )
     }
 }
@@ -1940,7 +2167,7 @@ impl Render for GeekZipApp {
             .flex()
             .flex_col()
             .bg(BG)
-            .font_family("Maple Mono NF CN")
+            .font_family("JetBrains Mono")
             .child(self.header(cx))
             .child(match self.mode {
                 AppMode::Normal => self.normal_workspace(cx).into_any_element(),
@@ -1969,6 +2196,12 @@ impl Render for GeekZipApp {
 
 fn main() {
     Application::new().run(move |cx: &mut App| {
+        let _ = cx.text_system().add_fonts(vec![
+            Cow::Borrowed(include_bytes!("../assets/fonts/JetBrainsMono.ttf")),
+            Cow::Borrowed(include_bytes!(
+                "../assets/fonts/MajorMonoDisplay-Regular.ttf"
+            )),
+        ]);
         gpui_component::init(cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(1536.), px(1024.)), cx)),

@@ -2125,7 +2125,7 @@ dependencies = [
 
 [[package]]
 name = "geekzip-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2137,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "geekzip-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "bzip2",
@@ -2164,7 +2164,7 @@ dependencies = [
 
 [[package]]
 name = "geekzip-gpui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "geekzip-core",
