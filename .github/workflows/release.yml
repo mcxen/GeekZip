@@ -42,12 +42,49 @@ jobs:
           codesign --force --deep --sign - dist/GeekZip.app
           ditto -c -k --sequesterRsrc --keepParent dist/GeekZip.app dist/GeekZip-macos-arm64.app.zip
           tar -C dist -czf dist/geekzip-cli-macos-arm64.tar.gz geekzip-cli
-          cd dist && shasum -a 256 GeekZip-macos-arm64.app.zip geekzip-cli-macos-arm64.tar.gz > SHA256SUMS
+          cd dist && shasum -a 256 GeekZip-macos-arm64.app.zip geekzip-cli-macos-arm64.tar.gz > SHA256SUMS-macos-arm64
 
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/GeekZip-macos-arm64.app.zip
             dist/geekzip-cli-macos-arm64.tar.gz
-            dist/SHA256SUMS
+            dist/SHA256SUMS-macos-arm64
+          generate_release_notes: true
+
+  windows-x64:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        shell: pwsh
+        run: cargo build --release -p geekzip-gpui -p geekzip-cli
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/GeekZip | Out-Null
+          Copy-Item target/release/geekzip-gpui.exe dist/GeekZip/GeekZip.exe
+          Copy-Item target/release/geekzip.exe dist/GeekZip/geekzip.exe
+          Copy-Item crates/geekzip-gpui/assets/icons/gz-icon-dark.png dist/GeekZip/GeekZip.png
+          @"
+          GeekZip ${env:GITHUB_REF_NAME}
+
+          Run GeekZip.exe for the native desktop UI.
+          Run geekzip.exe --help for the command-line tool.
+          "@ | Set-Content -Encoding UTF8 dist/GeekZip/README.txt
+          Compress-Archive -Path dist/GeekZip -DestinationPath dist/GeekZip-windows-x64.zip -Force
+          Compress-Archive -Path dist/GeekZip/geekzip.exe -DestinationPath dist/geekzip-cli-windows-x64.zip -Force
+          Get-FileHash dist/GeekZip-windows-x64.zip, dist/geekzip-cli-windows-x64.zip -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content -Encoding ASCII dist/SHA256SUMS-windows-x64
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/GeekZip-windows-x64.zip
+            dist/geekzip-cli-windows-x64.zip
+            dist/SHA256SUMS-windows-x64
           generate_release_notes: true

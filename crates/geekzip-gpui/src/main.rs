@@ -244,7 +244,25 @@ impl GeekZipApp {
                 .find(|value| !value.is_empty())
                 .and_then(|value| value.parse::<u8>().ok());
         }
-        #[cfg(not(target_os = "macos"))]
+
+        #[cfg(target_os = "windows")]
+        {
+            let output = Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    r#"$sample = Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction SilentlyContinue; if ($sample) { $sum = ($sample.CounterSamples | Measure-Object -Property CookedValue -Sum).Sum; [Math]::Round([Math]::Min($sum, 100)) }"#,
+                ])
+                .output()
+                .ok()?;
+            let text = String::from_utf8_lossy(&output.stdout);
+            return text
+                .split(|character: char| !character.is_ascii_digit())
+                .find(|value| !value.is_empty())
+                .and_then(|value| value.parse::<u8>().ok());
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         None
     }
 

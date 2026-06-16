@@ -1,6 +1,6 @@
 [package]
 name = "geekzip-gpui"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "GeekZip native GPUI desktop application"
 
