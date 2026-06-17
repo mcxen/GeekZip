@@ -2511,7 +2511,7 @@ impl GeekZipApp {
                             .gap_2()
                             .child(
                                 Self::option_button(
-                                    ("flatten-root", 0),
+                                    ("flatten-root", 0u32),
                                     "只保留一层",
                                     self.flatten_single_root,
                                 )
@@ -2525,7 +2525,7 @@ impl GeekZipApp {
                             )
                             .child(
                                 Self::option_button(
-                                    ("flatten-root", 1),
+                                    ("flatten-root", 1u32),
                                     "保留原结构",
                                     !self.flatten_single_root,
                                 )
@@ -3588,7 +3588,7 @@ impl GeekZipApp {
                             .gap_2()
                             .child(
                                 Self::option_button(
-                                    ("context-scope", 0),
+                                    ("context-scope", 0u32),
                                     "当前用户",
                                     !self.windows_context_menu_machine,
                                 )
@@ -3602,7 +3602,7 @@ impl GeekZipApp {
                             )
                             .child(
                                 Self::option_button(
-                                    ("context-scope", 1),
+                                    ("context-scope", 1u32),
                                     "所有用户",
                                     self.windows_context_menu_machine,
                                 )
