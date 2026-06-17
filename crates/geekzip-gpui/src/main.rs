@@ -1968,7 +1968,7 @@ impl GeekZipApp {
                             .child(if selected.is_some() {
                                 self.archive_detail.status.clone()
                             } else {
-                                "等待选择文件"
+                                "等待选择文件".to_string()
                             }),
                     ),
             )
