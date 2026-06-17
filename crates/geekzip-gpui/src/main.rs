@@ -161,7 +161,7 @@ struct ArchiveEntryDetail {
     encrypted: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum ManagedResultKind {
     Extract,
     Compress,
@@ -176,7 +176,7 @@ impl ManagedResultKind {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct ManagedResult {
     kind: ManagedResultKind,
     path: PathBuf,
@@ -290,6 +290,8 @@ struct AppSettings {
     windows_context_menu: WindowsContextMenuOptions,
     #[serde(default)]
     windows_context_menu_machine: bool,
+    #[serde(default)]
+    managed_results: Vec<ManagedResult>,
 }
 
 fn default_flatten_single_root() -> bool {
@@ -304,6 +306,7 @@ impl Default for AppSettings {
             flatten_single_root: true,
             windows_context_menu: WindowsContextMenuOptions::default(),
             windows_context_menu_machine: false,
+            managed_results: Vec::new(),
         }
     }
 }
@@ -312,6 +315,8 @@ impl GeekZipApp {
     fn new(window: &mut Window, cx: &mut Context<Self>, launch: ContextLaunch) -> Self {
         let settings = Self::load_settings();
         let extract_prefixes = settings.extract_prefixes.clone();
+        let managed_results = settings.managed_results.clone();
+        let selected_result = (!managed_results.is_empty()).then_some(0);
         Self {
             mode: AppMode::Pro,
             page: if launch.extract_path.is_some() {
@@ -349,8 +354,8 @@ impl GeekZipApp {
             password_input: cx
                 .new(|cx| InputState::new(window, cx).placeholder("输入一个解压密码")),
             passwords: Self::load_passwords(),
-            managed_results: Vec::new(),
-            selected_result: None,
+            managed_results,
+            selected_result,
             result_rename_input: cx.new(|cx| InputState::new(window, cx).placeholder("输入新名称")),
             busy: false,
             operation: "等待任务".into(),
@@ -502,6 +507,7 @@ impl GeekZipApp {
             flatten_single_root: self.flatten_single_root,
             windows_context_menu: self.windows_context_menu.clone(),
             windows_context_menu_machine: self.windows_context_menu_machine,
+            managed_results: self.managed_results.clone(),
         };
         if let Ok(bytes) = serde_json::to_vec_pretty(&settings) {
             let _ = fs::write(path, bytes);
@@ -673,6 +679,7 @@ impl GeekZipApp {
                 ));
                 self.result_rename_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
+                self.save_settings(cx);
             }
             Err(error) => {
                 self.result = format!("重命名失败：{error}");
@@ -1876,6 +1883,7 @@ impl GeekZipApp {
                                             format!("已从列表移除 {}", item.path.display());
                                     }
                                     this.selected_result = None;
+                                    this.save_settings(cx);
                                     cx.notify();
                                 }
                             },
@@ -2746,6 +2754,7 @@ impl GeekZipApp {
                                 PathBuf::from(&result.target_dir),
                             );
                         }
+                        this.save_settings(cx);
                         for (_, result) in successes.iter().take(8) {
                             this.operation_log
                                 .push(format!("[OK] 输出到 {}", result.target_dir));
@@ -2775,6 +2784,7 @@ impl GeekZipApp {
                                 PathBuf::from(&result.target_dir),
                             );
                         }
+                        this.save_settings(cx);
                         for (_, result) in successes.iter().take(6) {
                             this.operation_log
                                 .push(format!("[OK] 输出到 {}", result.target_dir));
@@ -3047,6 +3057,7 @@ impl GeekZipApp {
                                     parent.to_path_buf(),
                                 );
                             }
+                            this.save_settings(cx);
                             this.result = if volume_size_mb.is_some() {
                                 format!("完成 · 分卷输出 {}", output.display())
                             } else {

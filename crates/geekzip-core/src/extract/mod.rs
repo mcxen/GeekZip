@@ -686,12 +686,12 @@ impl ExtractEngine {
         Self::collect_files(target)
     }
 
-    fn progress_file_reader(
-        path: &Path,
-        control: &OperationControl,
-        progress: Option<ProgressCallback<'_>>,
+    fn progress_file_reader<'a>(
+        path: &'a Path,
+        control: &'a OperationControl,
+        progress: Option<ProgressCallback<'a>>,
         phase: &'static str,
-    ) -> Result<ProgressReader<fs::File, impl Fn(u64) + '_>> {
+    ) -> Result<ProgressReader<fs::File, impl Fn(u64) + 'a>> {
         let file = fs::File::open(path)?;
         let total = file.metadata()?.len();
         let done = Arc::new(AtomicU64::new(0));
