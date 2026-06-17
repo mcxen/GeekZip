@@ -9,6 +9,12 @@ anyhow = { workspace = true }
 geekzip-core = { path = "../geekzip-core" }
 gpui = "0.2.2"
 gpui-component = "0.5.1"
+serde = { workspace = true }
 serde_json = { workspace = true }
 sysinfo = "0.34"
 walkdir = { workspace = true }
+zip = { version = "2", features = ["aes-crypto"] }
+tar = "0.4"
+flate2 = "1"
+bzip2 = "0.5"
+xz2 = "0.1"

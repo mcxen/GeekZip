@@ -2167,12 +2167,18 @@ name = "geekzip-gpui"
 version = "0.2.3"
 dependencies = [
  "anyhow",
+ "bzip2",
+ "flate2",
  "geekzip-core",
  "gpui",
  "gpui-component",
+ "serde",
  "serde_json",
  "sysinfo 0.34.2",
+ "tar",
  "walkdir",
+ "xz2",
+ "zip",
 ]
 
 [[package]]

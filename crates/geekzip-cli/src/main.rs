@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -15,6 +15,8 @@ enum Commands {
         input: PathBuf,
         #[arg(short, long, help = "Target directory")]
         output: Option<PathBuf>,
+        #[arg(long, help = "Default extract directory when --output is not set")]
+        default_output: Option<PathBuf>,
         #[arg(short, long, help = "Password")]
         password: Option<String>,
         #[arg(long, help = "Delete archive after extraction")]
@@ -25,6 +27,13 @@ enum Commands {
         recursive: bool,
         #[arg(long, default_value = "10", help = "Max recursion depth")]
         max_depth: u32,
+        #[arg(long, help = "Remove this prefix from extracted file and folder names")]
+        strip_prefix: Vec<String>,
+        #[arg(
+            long,
+            help = "Flatten a redundant single top-level folder after extraction"
+        )]
+        flatten_single_root: bool,
     },
     Compress {
         #[arg(help = "Files/directories to compress")]
@@ -40,11 +49,54 @@ enum Commands {
         format: String,
         #[arg(short, long, help = "Password for encryption")]
         password: Option<String>,
+        #[arg(short, long, default_value = "6", help = "Compression level: 1-9")]
+        level: u32,
+        #[arg(long, help = "Split archive into volumes of this size in MB")]
+        volume_size_mb: Option<u64>,
+        #[arg(long, help = "Append suffix to volume parts, e.g. 中文混淆")]
+        obfuscate_suffix: Option<String>,
     },
     Info {
         #[arg(help = "Archive file to analyze")]
         input: PathBuf,
     },
+    InstallContextMenu {
+        #[arg(long, value_enum, default_value = "user")]
+        scope: MenuScope,
+        #[arg(long, help = "Path to geekzip.exe")]
+        cli_path: Option<PathBuf>,
+        #[arg(long, help = "Path to GeekZip.exe")]
+        app_path: Option<PathBuf>,
+        #[arg(long)]
+        no_smart_extract: bool,
+        #[arg(long)]
+        no_extract_here: bool,
+        #[arg(long)]
+        no_extract_to_folder: bool,
+        #[arg(long)]
+        no_extract_delete: bool,
+        #[arg(long)]
+        no_open_app: bool,
+    },
+    UninstallContextMenu {
+        #[arg(long, value_enum, default_value = "user")]
+        scope: MenuScope,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum MenuScope {
+    User,
+    Machine,
+}
+
+impl From<MenuScope> for geekzip_core::ContextMenuScope {
+    fn from(value: MenuScope) -> Self {
+        match value {
+            MenuScope::User => Self::User,
+            MenuScope::Machine => Self::Machine,
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -54,14 +106,18 @@ fn main() -> anyhow::Result<()> {
         Commands::Extract {
             input,
             output,
+            default_output,
             password,
             delete,
             subfolder,
             recursive,
             max_depth,
+            strip_prefix,
+            flatten_single_root,
         } => {
             let opts = geekzip_core::ExtractOptions {
                 target_dir: output.map(|p| p.to_string_lossy().to_string()),
+                default_target_dir: default_output.map(|p| p.to_string_lossy().to_string()),
                 create_subfolder: subfolder,
                 overwrite: geekzip_core::OverwritePolicy::Rename,
                 password,
@@ -69,6 +125,8 @@ fn main() -> anyhow::Result<()> {
                 delete_after: delete,
                 open_after: false,
                 verify: false,
+                rename_prefixes: strip_prefix,
+                flatten_single_root,
             };
 
             if recursive {
@@ -95,6 +153,9 @@ fn main() -> anyhow::Result<()> {
             output,
             format,
             password,
+            level,
+            volume_size_mb,
+            obfuscate_suffix,
         } => {
             let fmt = match format.as_str() {
                 "zip" => geekzip_core::CompressFormat::Zip,
@@ -106,9 +167,11 @@ fn main() -> anyhow::Result<()> {
             };
             let opts = geekzip_core::CompressOptions {
                 format: fmt,
-                level: 6,
+                level,
                 password,
                 create_subfolder: false,
+                volume_size_mb,
+                obfuscate_suffix,
             };
             let path_refs: Vec<&Path> = input.iter().map(|p| p.as_path()).collect();
             geekzip_core::CompressEngine::compress(&path_refs, &output, &opts)?;
@@ -123,6 +186,36 @@ fn main() -> anyhow::Result<()> {
             if let Ok(meta) = std::fs::metadata(&input) {
                 println!("Size:       {} bytes", meta.len());
             }
+        }
+        Commands::InstallContextMenu {
+            scope,
+            cli_path,
+            app_path,
+            no_smart_extract,
+            no_extract_here,
+            no_extract_to_folder,
+            no_extract_delete,
+            no_open_app,
+        } => {
+            let cli_path = cli_path.unwrap_or_else(geekzip_core::default_cli_path);
+            let options = geekzip_core::WindowsContextMenuOptions {
+                smart_extract: !no_smart_extract,
+                extract_here: !no_extract_here,
+                extract_to_folder: !no_extract_to_folder,
+                extract_delete: !no_extract_delete,
+                open_app: !no_open_app,
+            };
+            geekzip_core::install_windows_context_menu(
+                &cli_path,
+                app_path.as_deref(),
+                &options,
+                scope.into(),
+            )?;
+            println!("Windows context menu installed");
+        }
+        Commands::UninstallContextMenu { scope } => {
+            geekzip_core::uninstall_windows_context_menu(scope.into())?;
+            println!("Windows context menu removed");
         }
     }
 
