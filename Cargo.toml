@@ -4,6 +4,7 @@ members = [
     "crates/geekzip-core",
     "crates/geekzip-cli",
     "crates/geekzip-gpui",
+    "crates/geekzip-egui",
 ]
 
 [workspace.dependencies]
