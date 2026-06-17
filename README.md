@@ -42,5 +42,5 @@ Windows 版本会在 GitHub Release 中自动构建，下载
 
 ## 状态
 
-v0.2.2 加入 Windows x64 自动发布包，并在 Windows 上显示 CPU、GPU、内存、
-进程内存和线程资源曲线。macOS 发布包针对 Apple Silicon，未进行 Apple 公证签名。
+v0.2.3 修复 macOS 应用图标透明圆角，避免 Dock / Launchpad 中显示为矩形。
+当前发布包包括 macOS Apple Silicon 与 Windows x64，macOS 未进行 Apple 公证签名。
